@@ -70,20 +70,6 @@ This fork is approximately **75% based on the original Argon**, but with focused
 
 > if an issue still coccurs, please send your crash log "latest.log" in my discord server for troubleshooting.
 
-
-## GUI
-<img width="2560" height="1440" alt="Screenshot_20260317_171945" src="https://github.com/user-attachments/assets/4f7fe84d-1a8e-42af-b21e-1a37c2358815" />
-
-<img width="2560" height="1440" alt="Screenshot_20260317_172054" src="https://github.com/user-attachments/assets/00cd1753-a34f-45ba-9162-1b8225742bd9" />
-
-<img width="2560" height="1440" alt="Screenshot_20260317_174603" src="https://github.com/user-attachments/assets/eed33cd5-514d-4c97-8fc5-d5b5aa811aa9" />
-
-**themes**
-
-<img width="2560" height="1440" alt="Screenshot_20260317_174613" src="https://github.com/user-attachments/assets/12bc143f-af34-45d7-a740-6bd96a1faed2" />
-
-<img width="2560" height="1440" alt="Screenshot_20260317_174617" src="https://github.com/user-attachments/assets/07f161bf-8c35-4d2a-b080-092f04c3f517" />
-
 ## Configs
 
 **Grim AC** - PvpHub, Donut SMP, and likely any other large Popular servers.
