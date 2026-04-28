@@ -22,10 +22,8 @@ import org.lwjgl.glfw.GLFW;
 public final class AnchorMacro extends Module implements TickListener {
     public enum Mode { MODE1, MODE2 }
 
-    private final ModeSetting<Mode> mode = new ModeSetting<>(EncryptedString.of("Mode"), Mode.MODE1, Mode.class)
-            .setDescription(EncryptedString.of("Mode1: Right-click anchor to charge+explode | Mode2: Press key to place+charge+explode"));
-    private final KeybindSetting activateKey = new KeybindSetting(EncryptedString.of("Activate Key"), 71, false)
-            .setDescription(EncryptedString.of("Key for Mode2 - auto places and explodes anchor"));
+    private final ModeSetting<Mode> mode = new ModeSetting<>(EncryptedString.of("Mode"), Mode.MODE1, Mode.class);
+    private final KeybindSetting activateKey = new KeybindSetting(EncryptedString.of("Activate Key"), 71, false);
     private final NumberSetting switchDelay = new NumberSetting(EncryptedString.of("Switch Delay"), 0.0, 20.0, 0.0, 1.0);
     private final NumberSetting glowstoneDelay = new NumberSetting(EncryptedString.of("Glowstone Delay"), 0.0, 20.0, 0.0, 1.0);
     private final NumberSetting explodeDelay = new NumberSetting(EncryptedString.of("Explode Delay"), 0.0, 20.0, 0.0, 1.0);
@@ -35,11 +33,11 @@ public final class AnchorMacro extends Module implements TickListener {
     private int glowstoneClock;
     private int explodeClock;
 
-    
     private boolean mode2Active = false;
     private int mode2Step = 0;
     private BlockPos mode2Pos = null;
-    private BlockHitResult mode2Hit = null;
+    private BlockHitResult mode2PlaceHit = null;
+    private boolean mode2KeyWasPressed = false;
 
     public AnchorMacro() {
         super(EncryptedString.of("Anchor Macro"),
@@ -75,10 +73,12 @@ public final class AnchorMacro extends Module implements TickListener {
         }
     }
 
-
     private void handleMode1() {
         if (isShieldOrFoodActive()) return;
-        if (GLFW.glfwGetMouseButton(mc.getWindow().getHandle(), GLFW.GLFW_MOUSE_BUTTON_RIGHT) != GLFW.GLFW_PRESS) return;
+        if (GLFW.glfwGetMouseButton(mc.getWindow().getHandle(), GLFW.GLFW_MOUSE_BUTTON_RIGHT) != GLFW.GLFW_PRESS) {
+            resetClocks();
+            return;
+        }
 
         if (!(mc.crosshairTarget instanceof BlockHitResult hit)) return;
         if (!BlockUtils.isBlock(hit.getBlockPos(), Blocks.RESPAWN_ANCHOR)) return;
@@ -86,13 +86,13 @@ public final class AnchorMacro extends Module implements TickListener {
         mc.options.useKey.setPressed(false);
 
         if (BlockUtils.isAnchorNotCharged(hit.getBlockPos())) {
-            chargeAnchor(hit);
+            handleMode1Charge(hit);
         } else if (BlockUtils.isAnchorCharged(hit.getBlockPos())) {
-            explodeAnchor(hit);
+            handleMode1Explode(hit);
         }
     }
 
-    private void chargeAnchor(BlockHitResult hit) {
+    private void handleMode1Charge(BlockHitResult hit) {
         if (!mc.player.getMainHandStack().isOf(Items.GLOWSTONE)) {
             if (switchClock < switchDelay.getValueInt()) {
                 switchClock++;
@@ -100,8 +100,9 @@ public final class AnchorMacro extends Module implements TickListener {
             }
             switchClock = 0;
             InventoryUtils.selectItemFromHotbar(Items.GLOWSTONE);
+            return;
         }
-        if (!mc.player.getMainHandStack().isOf(Items.GLOWSTONE)) return;
+
         if (glowstoneClock < glowstoneDelay.getValueInt()) {
             glowstoneClock++;
             return;
@@ -110,7 +111,7 @@ public final class AnchorMacro extends Module implements TickListener {
         WorldUtils.placeBlock(hit, true);
     }
 
-    private void explodeAnchor(BlockHitResult hit) {
+    private void handleMode1Explode(BlockHitResult hit) {
         int slot = totemSlot.getValueInt() - 1;
         if (mc.player.getInventory().getSelectedSlot() != slot) {
             if (switchClock < switchDelay.getValueInt()) {
@@ -119,8 +120,9 @@ public final class AnchorMacro extends Module implements TickListener {
             }
             switchClock = 0;
             mc.player.getInventory().setSelectedSlot(slot);
+            return;
         }
-        if (mc.player.getInventory().getSelectedSlot() != slot) return;
+
         if (explodeClock < explodeDelay.getValueInt()) {
             explodeClock++;
             return;
@@ -129,76 +131,85 @@ public final class AnchorMacro extends Module implements TickListener {
         WorldUtils.placeBlock(hit, true);
     }
 
-
     private void handleMode2() {
         int key = activateKey.getKey();
-        boolean keyPressed = key != -1 && GLFW.glfwGetKey(mc.getWindow().getHandle(), key) == GLFW.GLFW_PRESS;
+        boolean keyDown = key != -1 && GLFW.glfwGetKey(mc.getWindow().getHandle(), key) == GLFW.GLFW_PRESS;
+        boolean keyJustPressed = keyDown && !mode2KeyWasPressed;
+        mode2KeyWasPressed = keyDown;
 
         if (!mode2Active) {
-            if (keyPressed && mc.crosshairTarget instanceof BlockHitResult hit
-                    && hit.getType() == HitResult.Type.BLOCK) {
-                startMode2(hit);
+            if (keyJustPressed && mc.crosshairTarget instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK) {
+                mode2Active = true;
+                mode2Step = 0;
+                mode2PlaceHit = hit;
+                mode2Pos = null;
+                resetClocks();
             }
-            return;
-        }
-
-
-        if (!keyPressed) {
-            resetState();
-            return;
-        }
-
-        if (mode2Pos == null || !BlockUtils.isBlock(mode2Pos, Blocks.RESPAWN_ANCHOR)) {
-
-        }
-
-        if (switchClock < switchDelay.getValueInt()) {
-            switchClock++;
             return;
         }
 
         switch (mode2Step) {
-            case 0 -> { 
-                InventoryUtils.selectItemFromHotbar(Items.RESPAWN_ANCHOR);
-                if (mc.player.getMainHandStack().isOf(Items.RESPAWN_ANCHOR) && mode2Hit != null) {
-                    WorldUtils.placeBlock(mode2Hit, true);
-                    mode2Pos = mode2Hit.getBlockPos().offset(mode2Hit.getSide());
-                    mode2Step++;
+            case 0 -> {
+                if (!mc.player.getMainHandStack().isOf(Items.RESPAWN_ANCHOR)) {
+                    if (switchClock < switchDelay.getValueInt()) {
+                        switchClock++;
+                        return;
+                    }
                     switchClock = 0;
+                    InventoryUtils.selectItemFromHotbar(Items.RESPAWN_ANCHOR);
+                    return;
                 }
+                if (mode2PlaceHit == null) {
+                    resetState();
+                    return;
+                }
+                WorldUtils.placeBlock(mode2PlaceHit, true);
+                mode2Pos = mode2PlaceHit.getBlockPos().offset(mode2PlaceHit.getSide());
+                mode2Step = 1;
+                switchClock = 0;
             }
+
             case 1 -> {
                 if (mode2Pos == null || !BlockUtils.isBlock(mode2Pos, Blocks.RESPAWN_ANCHOR)) {
-                    mode2Step = 0;
+                    resetState();
+                    return;
+                }
+                if (!mc.player.getMainHandStack().isOf(Items.GLOWSTONE)) {
+                    if (switchClock < switchDelay.getValueInt()) {
+                        switchClock++;
+                        return;
+                    }
+                    switchClock = 0;
+                    InventoryUtils.selectItemFromHotbar(Items.GLOWSTONE);
                     return;
                 }
                 if (BlockUtils.isAnchorNotCharged(mode2Pos)) {
-                    if (!mc.player.getMainHandStack().isOf(Items.GLOWSTONE)) {
-                        InventoryUtils.selectItemFromHotbar(Items.GLOWSTONE);
-                        switchClock = 0;
-                        return;
-                    }
                     if (glowstoneClock < glowstoneDelay.getValueInt()) {
                         glowstoneClock++;
                         return;
                     }
                     glowstoneClock = 0;
-                    BlockHitResult hit = new BlockHitResult(mode2Pos.toCenterPos(), mc.player.getHorizontalFacing(), mode2Pos, false);
-                    WorldUtils.placeBlock(hit, true);
+                    BlockHitResult chargeHit = new BlockHitResult(mode2Pos.toCenterPos(), mc.player.getHorizontalFacing(), mode2Pos, false);
+                    WorldUtils.placeBlock(chargeHit, true);
                 } else {
-                    mode2Step++;
+                    mode2Step = 2;
                     switchClock = 0;
                 }
             }
-            case 2 -> { 
+
+            case 2 -> {
                 if (mode2Pos == null || !BlockUtils.isBlock(mode2Pos, Blocks.RESPAWN_ANCHOR)) {
-                    mode2Step = 0;
+                    resetState();
                     return;
                 }
                 int slot = totemSlot.getValueInt() - 1;
                 if (mc.player.getInventory().getSelectedSlot() != slot) {
-                    mc.player.getInventory().setSelectedSlot(slot);
+                    if (switchClock < switchDelay.getValueInt()) {
+                        switchClock++;
+                        return;
+                    }
                     switchClock = 0;
+                    mc.player.getInventory().setSelectedSlot(slot);
                     return;
                 }
                 if (explodeClock < explodeDelay.getValueInt()) {
@@ -206,21 +217,11 @@ public final class AnchorMacro extends Module implements TickListener {
                     return;
                 }
                 explodeClock = 0;
-                BlockHitResult hit = new BlockHitResult(mode2Pos.toCenterPos(), mc.player.getHorizontalFacing(), mode2Pos, false);
-                WorldUtils.placeBlock(hit, true);
+                BlockHitResult explodeHit = new BlockHitResult(mode2Pos.toCenterPos(), mc.player.getHorizontalFacing(), mode2Pos, false);
+                WorldUtils.placeBlock(explodeHit, true);
                 resetState();
             }
         }
-    }
-
-    private void startMode2(BlockHitResult hit) {
-        mode2Active = true;
-        mode2Step = 0;
-        mode2Hit = hit;
-        mode2Pos = null;
-        switchClock = 0;
-        glowstoneClock = 0;
-        explodeClock = 0;
     }
 
     private boolean isShieldOrFoodActive() {
@@ -232,13 +233,18 @@ public final class AnchorMacro extends Module implements TickListener {
         return (food || shield) && rightClick;
     }
 
-    private void resetState() {
+    private void resetClocks() {
         switchClock = 0;
         glowstoneClock = 0;
         explodeClock = 0;
+    }
+
+    private void resetState() {
         mode2Active = false;
         mode2Step = 0;
         mode2Pos = null;
-        mode2Hit = null;
+        mode2PlaceHit = null;
+        mode2KeyWasPressed = false;
+        resetClocks();
     }
 }

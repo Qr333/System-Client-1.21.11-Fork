@@ -23,25 +23,21 @@ import org.lwjgl.glfw.GLFW;
 public final class SafeAnchor extends Module implements TickListener {
     public enum LookMode { INSTA, LEGIT }
 
-    private final KeybindSetting activateKey = new KeybindSetting(EncryptedString.of("Activate Key"), 71, false)
-            .setDescription(EncryptedString.of("Key to activate SafeAnchor sequence"));
-    private final NumberSetting delay = new NumberSetting(EncryptedString.of("Delay"), 0, 10, 1, 1)
-            .setDescription(EncryptedString.of("Ticks between actions"));
-    private final NumberSetting totemSlot = new NumberSetting(EncryptedString.of("Totem Slot"), 1, 9, 1, 1)
-            .setDescription(EncryptedString.of("Hotbar slot to switch to for exploding (1-9)"));
-    private final ModeSetting<LookMode> lookMode = new ModeSetting<>(EncryptedString.of("Look Mode"), LookMode.INSTA, LookMode.class)
-            .setDescription(EncryptedString.of("How to look at the anchor - Insta: instant snap, Legit: smooth look"));
-    private final BooleanSetting autoExplode = new BooleanSetting(EncryptedString.of("Auto Explode"), true)
-            .setDescription(EncryptedString.of("Automatically switch to totem slot and explode after charging"));
+    private final KeybindSetting activateKey = new KeybindSetting(EncryptedString.of("Activate Key"), 71, false);
+    private final NumberSetting delay = new NumberSetting(EncryptedString.of("Delay"), 0, 10, 1, 1);
+    private final NumberSetting totemSlot = new NumberSetting(EncryptedString.of("Totem Slot"), 1, 9, 1, 1);
+    private final ModeSetting<LookMode> lookMode = new ModeSetting<>(EncryptedString.of("Look Mode"), LookMode.INSTA, LookMode.class);
+    private final BooleanSetting autoExplode = new BooleanSetting(EncryptedString.of("Auto Explode"), true);
 
     private int step = 0;
     private int delayCounter = 0;
     private boolean isRunning = false;
     private BlockPos targetPos = null;
+    private boolean keyWasPressed = false;
 
     public SafeAnchor() {
         super(EncryptedString.of("Safe Anchor"),
-                EncryptedString.of("Places anchor, charges it safely, then explodes"),
+                EncryptedString.of("Charges and explodes a respawn anchor safely"),
                 -1,
                 Category.CrystalPvP);
         addSettings(activateKey, delay, totemSlot, lookMode, autoExplode);
@@ -66,9 +62,20 @@ public final class SafeAnchor extends Module implements TickListener {
         if (mc.currentScreen != null) return;
         if (mc.player == null || mc.world == null) return;
 
+        int key = activateKey.getKey();
+        boolean keyDown = key != -1 && GLFW.glfwGetKey(mc.getWindow().getHandle(), key) == GLFW.GLFW_PRESS;
+        boolean keyJustPressed = keyDown && !keyWasPressed;
+        keyWasPressed = keyDown;
+
         if (!isRunning) {
-            if (activateKey.getKey() != -1 && GLFW.glfwGetKey(mc.getWindow().getHandle(), activateKey.getKey()) == GLFW.GLFW_PRESS) {
-                startSequence();
+            if (keyJustPressed && mc.crosshairTarget instanceof BlockHitResult hit) {
+                BlockPos pos = hit.getBlockPos();
+                if (BlockUtils.isBlock(pos, Blocks.RESPAWN_ANCHOR)) {
+                    targetPos = pos;
+                    isRunning = true;
+                    step = 0;
+                    delayCounter = 0;
+                }
             }
             return;
         }
@@ -86,68 +93,58 @@ public final class SafeAnchor extends Module implements TickListener {
 
         lookAtAnchor();
 
+        BlockHitResult hit = new BlockHitResult(targetPos.toCenterPos(), mc.player.getHorizontalFacing(), targetPos, false);
+
         switch (step) {
             case 0 -> {
-                if (BlockUtils.isAnchorNotCharged(targetPos)) {
-                    if (InventoryUtils.selectItemFromHotbar(Items.GLOWSTONE)) {
-                        WorldUtils.placeBlock(new BlockHitResult(
-                                targetPos.toCenterPos(),
-                                mc.player.getHorizontalFacing(),
-                                targetPos, false
-                        ), true);
-                    }
-                } else {
-                    step++;
-                }
-            }
-            case 1 -> {
                 if (BlockUtils.isAnchorCharged(targetPos)) {
-                    if (autoExplode.getValue()) {
-                        int slot = totemSlot.getValueInt() - 1;
-                        InventoryUtils.setInvSlot(slot);
-                        step++;
-                    } else {
-                        reset();
-                    }
+                    step = 1;
+                    return;
                 }
+                if (!mc.player.getMainHandStack().isOf(Items.GLOWSTONE)) {
+                    InventoryUtils.selectItemFromHotbar(Items.GLOWSTONE);
+                    return;
+                }
+                WorldUtils.placeBlock(hit, true);
             }
+
+            case 1 -> {
+                if (!BlockUtils.isAnchorCharged(targetPos)) {
+                    step = 0;
+                    return;
+                }
+                if (!autoExplode.getValue()) {
+                    reset();
+                    return;
+                }
+                int slot = totemSlot.getValueInt() - 1;
+                if (mc.player.getInventory().getSelectedSlot() != slot) {
+                    mc.player.getInventory().setSelectedSlot(slot);
+                    return;
+                }
+                step = 2;
+            }
+
             case 2 -> {
-                WorldUtils.placeBlock(new BlockHitResult(
-                        targetPos.toCenterPos(),
-                        mc.player.getHorizontalFacing(),
-                        targetPos, false
-                ), true);
+                WorldUtils.placeBlock(hit, true);
                 reset();
             }
         }
     }
 
-    private void startSequence() {
-        if (mc.crosshairTarget instanceof BlockHitResult hit) {
-            targetPos = hit.getBlockPos();
-            if (BlockUtils.isBlock(targetPos, Blocks.RESPAWN_ANCHOR)) {
-                isRunning = true;
-                step = 0;
-                delayCounter = 0;
-            }
-        }
-    }
-
     private void lookAtAnchor() {
-        if (targetPos == null) return;
+        if (targetPos == null || mc.player == null) return;
         Vec3d anchorCenter = targetPos.toCenterPos();
+        Rotation target = RotationUtils.getDirection(mc.player, anchorCenter);
 
         if (lookMode.getMode() == LookMode.INSTA) {
-            Rotation rotation = RotationUtils.getDirection(mc.player, anchorCenter);
-            mc.player.setYaw((float) rotation.yaw());
-            mc.player.setPitch((float) rotation.pitch());
+            mc.player.setYaw((float) target.yaw());
+            mc.player.setPitch((float) target.pitch());
         } else {
-            Rotation targetRot = RotationUtils.getDirection(mc.player, anchorCenter);
-            float targetYaw = (float) targetRot.yaw();
-            float targetPitch = (float) targetRot.pitch();
-
             float currentYaw = mc.player.getYaw();
             float currentPitch = mc.player.getPitch();
+            float targetYaw = (float) target.yaw();
+            float targetPitch = (float) target.pitch();
 
             float deltaYaw = targetYaw - currentYaw;
             while (deltaYaw > 180) deltaYaw -= 360;
