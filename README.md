@@ -3,7 +3,7 @@ The visuals are mid i guess and easy to understand which makes this project a gr
 
 This fork is meant to be a solid base for your first Minecraft client, especially if you want to learn how Java clients work on newer versions. The structure is beginner‑friendly, the code is readable, and it’s perfect for testing modules, experimenting with rendering, or understanding how PvP‑related features are built.
 You may need to change some stuff to Match how you like it! :0
-AnchorMacro Doesnt Work Same for Safeanchor
+AnchorMacro Works Kinda and Safeanchor Doesnt Work Lol
 
 Here Some Pictures
 <img width="1448" height="1037" alt="image" src="https://github.com/user-attachments/assets/ac6171dd-0bc7-4d0e-ac08-723d1d03c7bf" />
